@@ -1,89 +1,96 @@
-const {config} = require('dotenv');
-const {Client} = require("@notionhq/client");
-const dayjs = require('dayjs');
-const got = require('got');
+const { config } = require("dotenv");
+const { Client } = require("@notionhq/client");
+const dayjs = require("dayjs");
+const got = require("got");
 const jsdom = require("jsdom");
-const {JSDOM} = jsdom;
-const Parser = require('rss-parser');
+const { JSDOM } = jsdom;
+const Parser = require("rss-parser");
 const parser = new Parser();
-const {DB_PROPERTIES, PropertyType, sleep} = require('./util');
+const { DB_PROPERTIES, PropertyType, sleep } = require("./util");
+const fs = require("fs");
 
 config();
 
 const RATING_TEXT = {
-  '很差': 1,
-  '较差': 2,
-  '还行': 3,
-  '推荐': 4,
-  '力荐': 5,
+  很差: 1,
+  较差: 2,
+  还行: 3,
+  推荐: 4,
+  力荐: 5,
 };
-const done = /^(看过|听过|读过|玩过)/;
+const done = /^(看过|想看|在看)/;
 const CATEGORY = {
-  movie: 'movie',
-  music: 'music',
-  book: 'book',
-  game: 'game',
-  drama: 'drama',
+  movie: "movie",
+  music: "music",
+  book: "book",
+  game: "game",
+  drama: "drama",
 };
 const EMOJI = {
-  movie: '🎞',
-  music: '🎶',
-  book: '📖',
-  game: '🕹',
-  drama: '💃🏻',
+  movie: "🎞",
+  music: "🎶",
+  book: "📖",
+  game: "🕹",
+  drama: "💃🏻",
 };
 
-const DOUBAN_USER_ID = process.env.DOUBAN_USER_ID;
+const DOUBAN_USER_ID = "178287366"; //process.env.DOUBAN_USER_ID;
 const notion = new Client({
-  auth: process.env.NOTION_TOKEN,
+  auth: "secret_eCl03buOceBHRbvEe7jlt9Jfgj9LHGYnFFtqDmrUsmo", //process.env.NOTION_TOKEN,
 });
-const movieDBID = process.env.NOTION_MOVIE_DATABASE_ID;
+const movieDBID = "e043a6803faf43cd9d2a9ded57c2f4e9"; //process.env.NOTION_MOVIE_DATABASE_ID;
 const musicDBID = process.env.NOTION_MUSIC_DATABASE_ID;
 const bookDBID = process.env.NOTION_BOOK_DATABASE_ID;
 const gameDBID = process.env.NOTION_GAME_DATABASE_ID;
 const dramaDBID = process.env.NOTION_DRAMA_DATABASE_ID;
 
+function delay(time) {
+  return new Promise((resolve) => setTimeout(resolve, time));
+}
+
 (async () => {
-  console.log('Refreshing feeds from RSS...');
+  console.log("Refreshing feeds from RSS...");
   let feed;
   try {
-    feed = await parser.parseURL(`https://www.douban.com/feed/people/${DOUBAN_USER_ID}/interests`);
+    feed = await parser.parseURL(
+      `https://www.douban.com/feed/people/${DOUBAN_USER_ID}/interests`
+    );
   } catch (error) {
-    console.error('Failed to parse RSS url: ', error);
+    console.error("Failed to parse RSS url: ", error);
     process.exit(1);
   }
 
   let feedData = {};
 
-  feed = feed.items.filter(item => done.test(item.title)); // care for done status items only for now
-  feed.forEach(item => {
-    const {category, id} = getCategoryAndId(item.title, item.link);
+  feed = feed.items.filter((item) => done.test(item.title)); // care for done status items only for now
+  for (let item of feed) {
+    const { category, id } = getCategoryAndId(item.title, item.link);
     const dom = new JSDOM(item.content.trim());
-    const contents = [...dom.window.document.querySelectorAll('td p')];
-    let rating = contents.filter(el => el.textContent.startsWith('推荐'));
+    const contents = [...dom.window.document.querySelectorAll("td p")];
+    let rating = contents.filter((el) => el.textContent.startsWith("推荐"));
     if (rating.length) {
-      rating = rating[0].textContent.replace(/^推荐: /, '').trim();
+      rating = rating[0].textContent.replace(/^推荐: /, "").trim();
       rating = RATING_TEXT[rating];
     }
-    let comment = contents.filter(el => el.textContent.startsWith('备注'));
+    let comment = contents.filter((el) => el.textContent.startsWith("备注"));
     if (comment.length) {
-      comment = comment[0].textContent.replace(/^备注: /, '').trim();
+      comment = comment[0].textContent.replace(/^备注: /, "").trim();
     }
     const result = {
       id,
       link: item.link,
-      rating: typeof rating === 'number' ? rating : null,
-      comment: typeof comment === 'string' ? comment : null, // 备注：XXX -> 短评
+      rating: typeof rating === "number" ? rating : null,
+      comment: typeof comment === "string" ? comment : null, // 备注：XXX -> 短评
       time: item.isoDate, // '2021-05-30T06:49:34.000Z'
     };
     if (!feedData[category]) {
       feedData[category] = [];
     }
     feedData[category].push(result);
-  });
+  }
 
   if (feed.length === 0) {
-    console.log('No new items.');
+    console.log("No new items.");
     return;
   }
 
@@ -99,7 +106,7 @@ const dramaDBID = process.env.NOTION_DRAMA_DATABASE_ID;
     }
   }
 
-  console.log('All feeds are handled.');
+  console.log("All feeds are handled.");
 })();
 
 async function handleFeed(feed, category) {
@@ -113,6 +120,8 @@ async function handleFeed(feed, category) {
     return;
   }
 
+  console.log(feed.length);
+
   console.log(`Handling ${category} feeds...`);
   // query current db to check whether already inserted
   let filtered;
@@ -120,7 +129,7 @@ async function handleFeed(feed, category) {
     filtered = await notion.databases.query({
       database_id: dbID,
       filter: {
-        or: feed.map(item => ({
+        or: feed.map((item) => ({
           property: DB_PROPERTIES.ITEM_LINK,
           url: {
             contains: item.id,
@@ -131,40 +140,64 @@ async function handleFeed(feed, category) {
       },
     });
   } catch (error) {
-    console.error(`Failed to query ${category} database to check already inserted items. `, error);
+    console.error(
+      `Failed to query ${category} database to check already inserted items. `,
+      error
+    );
     process.exit(1);
   }
 
-  if (filtered.results.length) {
-    feed = feed.filter(item => {
-      let findItem = filtered.results.filter(async i => {
-        // need to fetch property item as the database filter results do not include
-        // property contents any more, see https://developers.notion.com/reference/retrieve-a-page-property
-        let propItem = await notion.pages.properties.retrieve({
-          page_id: i.id,
-          property_id: i.properties[DB_PROPERTIES.ITEM_LINK].id,
-        });
-        return propItem.url === item.link;
-      });
-      return !findItem.length; // if length != 0 means can find item in the filtered results, means this item already in db
-    });
-  }
+  console.log(filtered.results.length);
+  let newFeed;
+  await (async () => {
+    if (filtered.results.length) {
+      for (item of feed) {
+        let findItem = await filtered.results.reduce(async (acc, i) => {
+          // need to fetch property item as the database filter results do not include
+          // property contents any more, see https://developers.notion.com/reference/retrieve-a-page-property
+          let propItem = await notion.pages.properties.retrieve({
+            page_id: i.id,
+            property_id: i.properties[DB_PROPERTIES.ITEM_LINK].id,
+          });
+          if (
+            propItem.url.split("/").slice(-2)[0] ==
+            item.link.split("/").slice(-2)[0]
+          ) {
+            return (await acc).concat(i);
+          }
+          return acc;
+        }, []);
+        if (!findItem.length) {
+          newFeed = newFeed ? newFeed.concat(item) : [item];
+        } // if length != 0 means can find item in the filtered results, means this item already in db
+      }
+      console.log(newFeed.length);
+    }
+  })();
 
-  console.log(`There are total ${feed.length} new ${category} item(s) need to insert.`);
+  console.log(
+    `There are total ${feed.length} new ${category} item(s) need to insert.`
+  );
 
   for (let i = 0; i < feed.length; i++) {
     const item = feed[i];
     const link = item.link;
     let itemData;
     try {
+      delay(1000);
       itemData = await fetchItem(link, category);
       itemData[DB_PROPERTIES.ITEM_LINK] = link;
       itemData[DB_PROPERTIES.RATING] = item.rating;
-      itemData[DB_PROPERTIES.RATING_DATE] = dayjs(item.time).format('YYYY-MM-DD');
-      itemData[DB_PROPERTIES.COMMENTS] = item.comment;
+      itemData[DB_PROPERTIES.RATING_DATE] = dayjs(item.time).format(
+        "YYYY-MM-DD"
+      );
     } catch (error) {
       console.error(link, error);
     }
+
+    console.log(itemData);
+    console.log("itemData");
+    return;
 
     if (itemData) {
       await addToNotion(itemData, category);
@@ -172,7 +205,7 @@ async function handleFeed(feed, category) {
     }
   }
   console.log(`${category} feeds done.`);
-  console.log('====================');
+  console.log("====================");
 }
 
 function getCategoryAndId(title, link) {
@@ -180,8 +213,10 @@ function getCategoryAndId(title, link) {
   m = m[1];
   let res, id;
   switch (m) {
-    case '看过':
-      if (link.startsWith('http://movie.douban.com/')) {
+    case "看过":
+    case "在看":
+    case "想看":
+      if (link.startsWith("http://movie.douban.com/")) {
         res = CATEGORY.movie; // "看过" maybe 舞台剧
         id = link.match(/movie\.douban\.com\/subject\/(\d+)\/?/);
         id = id[1]; // string
@@ -191,17 +226,17 @@ function getCategoryAndId(title, link) {
         id = id[1]; // string
       }
       break;
-    case '读过':
+    case "读过":
       res = CATEGORY.book;
       id = link.match(/book\.douban\.com\/subject\/(\d+)\/?/);
       id = id[1]; // string
       break;
-    case '听过':
+    case "听过":
       res = CATEGORY.music;
       id = link.match(/music\.douban\.com\/subject\/(\d+)\/?/);
       id = id[1]; // string
       break;
-    case '玩过':
+    case "玩过":
       res = CATEGORY.game;
       id = link.match(/www\.douban\.com\/game\/(\d+)\/?/);
       id = id[1]; // string
@@ -209,7 +244,7 @@ function getCategoryAndId(title, link) {
     default:
       break;
   }
-  return {category: res, id};
+  return { category: res, id };
 }
 
 function getDBID(category) {
@@ -244,82 +279,146 @@ async function fetchItem(link, category) {
 
   // movie item page
   if (category === CATEGORY.movie) {
-    itemData[DB_PROPERTIES.TITLE] = dom.window.document.querySelector('#content h1 [property="v:itemreviewed"]').textContent.trim();
-    itemData[DB_PROPERTIES.YEAR] = dom.window.document.querySelector('#content h1 .year').textContent.slice(1, -1);
-    itemData[DB_PROPERTIES.POSTER] = dom.window.document.querySelector('#mainpic img')?.src.replace(/\.webp$/, '.jpg');
-    itemData[DB_PROPERTIES.DIRECTORS] = dom.window.document.querySelector('#info .attrs').textContent;
-    itemData[DB_PROPERTIES.ACTORS] = [...dom.window.document.querySelectorAll('#info .actor .attrs a')].slice(0, 5).map(i => i.textContent).join(' / ');
-    itemData[DB_PROPERTIES.GENRE] = [...dom.window.document.querySelectorAll('#info [property="v:genre"]')].map(i => i.textContent); // array
-    const imdbInfo = [...dom.window.document.querySelectorAll('#info span.pl')].filter(i => i.textContent.startsWith('IMDb'));
+    console.log(
+      dom.window.document
+        .querySelector("#content #recommendations i")
+        .textContent.trim()
+    );
+    itemData[DB_PROPERTIES.TITLE] = dom.window.document
+      .querySelector('#content h1 [property="v:itemreviewed"]')
+      .textContent.trim();
+    itemData[DB_PROPERTIES.YEAR] = dom.window.document
+      .querySelector("#content h1 .year")
+      .textContent.slice(1, -1);
+    itemData[DB_PROPERTIES.POSTER] = dom.window.document
+      .querySelector("#mainpic img")
+      ?.src.replace(/\.webp$/, ".jpg");
+    itemData[DB_PROPERTIES.DIRECTORS] =
+      dom.window.document.querySelector("#info .attrs").textContent;
+    itemData[DB_PROPERTIES.ACTORS] = [
+      ...dom.window.document.querySelectorAll("#info .actor .attrs a"),
+    ]
+      .slice(0, 5)
+      .map((i) => i.textContent)
+      .join(" / ");
+    itemData[DB_PROPERTIES.GENRE] = [
+      ...dom.window.document.querySelectorAll('#info [property="v:genre"]'),
+    ].map((i) => i.textContent); // array
+    const imdbInfo = [
+      ...dom.window.document.querySelectorAll("#info span.pl"),
+    ].filter((i) => i.textContent.startsWith("IMDb"));
     if (imdbInfo.length) {
-      itemData[DB_PROPERTIES.IMDB_LINK] = 'https://www.imdb.com/title/' + imdbInfo[0].nextSibling.textContent.trim();
+      itemData[DB_PROPERTIES.IMDB_LINK] =
+        "https://www.imdb.com/title/" +
+        imdbInfo[0].nextSibling.textContent.trim();
     }
 
-  // music item page
+    // music item page
   } else if (category === CATEGORY.music) {
-    itemData[DB_PROPERTIES.TITLE] = dom.window.document.querySelector('#wrapper h1 span').textContent.trim();
-    itemData[DB_PROPERTIES.POSTER] = dom.window.document.querySelector('#mainpic img')?.src.replace(/\.webp$/, '.jpg');
-    let info = [...dom.window.document.querySelectorAll('#info span.pl')];
-    let release = info.filter(i => i.textContent.trim().startsWith('发行时间'));
+    itemData[DB_PROPERTIES.TITLE] = dom.window.document
+      .querySelector("#wrapper h1 span")
+      .textContent.trim();
+    itemData[DB_PROPERTIES.POSTER] = dom.window.document
+      .querySelector("#mainpic img")
+      ?.src.replace(/\.webp$/, ".jpg");
+    let info = [...dom.window.document.querySelectorAll("#info span.pl")];
+    let release = info.filter((i) =>
+      i.textContent.trim().startsWith("发行时间")
+    );
     if (release.length) {
       let date = release[0].nextSibling.textContent.trim(); // 2021-05-31, or 2021-4-2
-      itemData[DB_PROPERTIES.RELEASE_DATE] = dayjs(date).format('YYYY-MM-DD');
+      itemData[DB_PROPERTIES.RELEASE_DATE] = dayjs(date).format("YYYY-MM-DD");
     }
-    let musician = info.filter(i => i.textContent.trim().startsWith('表演者'));
+    let musician = info.filter((i) =>
+      i.textContent.trim().startsWith("表演者")
+    );
     if (musician.length) {
-      itemData[DB_PROPERTIES.MUSICIAN] = musician[0].textContent.replace('表演者:', '').trim().split('\n').map(v => v.trim()).join('');
+      itemData[DB_PROPERTIES.MUSICIAN] = musician[0].textContent
+        .replace("表演者:", "")
+        .trim()
+        .split("\n")
+        .map((v) => v.trim())
+        .join("");
       // split and trim to remove extra spaces, rich_text length limited to 2000
     }
 
-  // book item page
+    // book item page
   } else if (category === CATEGORY.book) {
-    itemData[DB_PROPERTIES.TITLE] = dom.window.document.querySelector('#wrapper h1 [property="v:itemreviewed"]').textContent.trim();
-    itemData[DB_PROPERTIES.POSTER] = dom.window.document.querySelector('#mainpic img')?.src.replace(/\.webp$/, '.jpg');
-    let info = [...dom.window.document.querySelectorAll('#info span.pl')];
-    info.forEach(i => {
+    itemData[DB_PROPERTIES.TITLE] = dom.window.document
+      .querySelector('#wrapper h1 [property="v:itemreviewed"]')
+      .textContent.trim();
+    itemData[DB_PROPERTIES.POSTER] = dom.window.document
+      .querySelector("#mainpic img")
+      ?.src.replace(/\.webp$/, ".jpg");
+    let info = [...dom.window.document.querySelectorAll("#info span.pl")];
+    info.forEach((i) => {
       let text = i.textContent.trim();
       let nextText = i.nextSibling?.textContent.trim();
-      if (text.startsWith('作者')) {
+      if (text.startsWith("作者")) {
         let parent = i.parentElement;
-        if (parent.id === 'info') { // if only one writer, then parentElement is the #info container
-          itemData[DB_PROPERTIES.WRITER] = i.nextElementSibling.textContent.replace(/\n/g, '').replace(/\s/g, '');
-        } else { // if multiple writers, there will be a separate <span> element
-          itemData[DB_PROPERTIES.WRITER] = i.parentElement.textContent.trim().replace('作者:', '').trim();
+        if (parent.id === "info") {
+          // if only one writer, then parentElement is the #info container
+          itemData[DB_PROPERTIES.WRITER] = i.nextElementSibling.textContent
+            .replace(/\n/g, "")
+            .replace(/\s/g, "");
+        } else {
+          // if multiple writers, there will be a separate <span> element
+          itemData[DB_PROPERTIES.WRITER] = i.parentElement.textContent
+            .trim()
+            .replace("作者:", "")
+            .trim();
         }
-      } else if (text.startsWith('出版社')) {
+      } else if (text.startsWith("出版社")) {
         itemData[DB_PROPERTIES.PUBLISHING_HOUSE] = nextText;
-      } else if (text.startsWith('原作名')) {
+      } else if (text.startsWith("原作名")) {
         itemData[DB_PROPERTIES.TITLE] += nextText;
-      } else if (text.startsWith('出版年')) {
-        itemData[DB_PROPERTIES.PUBLICATION_DATE] = dayjs(nextText).format('YYYY-MM-DD'); // this can have only year, month, but need to format to YYYY-MM-DD
-      } else if (text.startsWith('ISBN')) {
+      } else if (text.startsWith("出版年")) {
+        itemData[DB_PROPERTIES.PUBLICATION_DATE] =
+          dayjs(nextText).format("YYYY-MM-DD"); // this can have only year, month, but need to format to YYYY-MM-DD
+      } else if (text.startsWith("ISBN")) {
         itemData[DB_PROPERTIES.ISBN] = Number(nextText);
       }
     });
 
-  // game item page
+    // game item page
   } else if (category === CATEGORY.game) {
-    itemData[DB_PROPERTIES.TITLE] = dom.window.document.querySelector('#wrapper #content h1').textContent.trim();
-    itemData[DB_PROPERTIES.POSTER] = dom.window.document.querySelector('.item-subject-info .pic img')?.src.replace(/\.webp$/, '.jpg');
-    const gameInfo = dom.window.document.querySelector('#content .game-attr');
-    const dts = [...gameInfo.querySelectorAll('dt')].filter(i => i.textContent.startsWith('类型') || i.textContent.startsWith('发行日期'));
+    itemData[DB_PROPERTIES.TITLE] = dom.window.document
+      .querySelector("#wrapper #content h1")
+      .textContent.trim();
+    itemData[DB_PROPERTIES.POSTER] = dom.window.document
+      .querySelector(".item-subject-info .pic img")
+      ?.src.replace(/\.webp$/, ".jpg");
+    const gameInfo = dom.window.document.querySelector("#content .game-attr");
+    const dts = [...gameInfo.querySelectorAll("dt")].filter(
+      (i) =>
+        i.textContent.startsWith("类型") || i.textContent.startsWith("发行日期")
+    );
     if (dts.length) {
-      dts.forEach(dt => {
-        if (dt.textContent.startsWith('类型')) {
-          itemData[DB_PROPERTIES.GENRE] = [...dt.nextElementSibling.querySelectorAll('a')].map(a => a.textContent.trim()); //array
-        } else if (dt.textContent.startsWith('发行日期')) {
+      dts.forEach((dt) => {
+        if (dt.textContent.startsWith("类型")) {
+          itemData[DB_PROPERTIES.GENRE] = [
+            ...dt.nextElementSibling.querySelectorAll("a"),
+          ].map((a) => a.textContent.trim()); //array
+        } else if (dt.textContent.startsWith("发行日期")) {
           let date = dt.nextElementSibling.textContent.trim();
-          itemData[DB_PROPERTIES.RELEASE_DATE] = dayjs(date).format('YYYY-MM-DD');
+          itemData[DB_PROPERTIES.RELEASE_DATE] =
+            dayjs(date).format("YYYY-MM-DD");
         }
-      })
+      });
     }
 
-  // drama item page
+    // drama item page
   } else if (category === CATEGORY.drama) {
-    itemData[DB_PROPERTIES.TITLE] = dom.window.document.querySelector('#content .drama-info .meta h1').textContent.trim();
-    let genre = dom.window.document.querySelector('#content .drama-info .meta [itemprop="genre"]').textContent.trim();
+    itemData[DB_PROPERTIES.TITLE] = dom.window.document
+      .querySelector("#content .drama-info .meta h1")
+      .textContent.trim();
+    let genre = dom.window.document
+      .querySelector('#content .drama-info .meta [itemprop="genre"]')
+      .textContent.trim();
     itemData[DB_PROPERTIES.GENRE] = [genre];
-    itemData[DB_PROPERTIES.POSTER] = dom.window.document.querySelector('.drama-info .pic img')?.src.replace(/\.webp$/, '.jpg');
+    itemData[DB_PROPERTIES.POSTER] = dom.window.document
+      .querySelector(".drama-info .pic img")
+      ?.src.replace(/\.webp$/, ".jpg");
   }
 
   return itemData;
@@ -328,7 +427,7 @@ async function fetchItem(link, category) {
 function getPropertyValye(value, type, key) {
   let res = null;
   switch (type) {
-    case 'title':
+    case "title":
       res = {
         title: [
           {
@@ -339,57 +438,63 @@ function getPropertyValye(value, type, key) {
         ],
       };
       break;
-    case 'file':
+    case "file":
       res = {
         files: [
           {
             // file: {}
             name: value,
-            external: { // need external:{} format to insert the files property, but still not successful
+            external: {
+              // need external:{} format to insert the files property, but still not successful
               url: value,
             },
           },
         ],
       };
       break;
-    case 'date':
+    case "date":
       res = {
         date: {
           start: value,
         },
       };
       break;
-    case 'multi_select':
-      res = key === DB_PROPERTIES.RATING ? {
-        'multi_select': value ? [
-          {
-            name: value.toString(),
-          },
-        ] : [],
-      } : {
-        'multi_select': (value || []).map(g => ({
-          name: g, // @Q: if the option is not created before, can not use it directly here?
-        })),
-      };
+    case "multi_select":
+      res =
+        key === DB_PROPERTIES.RATING
+          ? {
+              multi_select: value
+                ? [
+                    {
+                      name: value.toString(),
+                    },
+                  ]
+                : [],
+            }
+          : {
+              multi_select: (value || []).map((g) => ({
+                name: g, // @Q: if the option is not created before, can not use it directly here?
+              })),
+            };
       break;
-    case 'rich_text':
+    case "rich_text":
       res = {
-        'rich_text': [
+        rich_text: [
           {
-            type: 'text',
+            type: "text",
             text: {
-              content: value || '',
+              content: value || "",
             },
           },
         ],
-      }
+      };
       break;
-    case 'number':
+    case "number":
       res = {
         number: value ? Number(value) : null,
       };
       break;
-    case 'url':
+    case "url":
       res = {
         url: value || url,
       };
@@ -402,26 +507,34 @@ function getPropertyValye(value, type, key) {
 }
 
 async function addToNotion(itemData, category) {
-  console.log('Going to insert ', itemData[DB_PROPERTIES.RATING_DATE], itemData[DB_PROPERTIES.TITLE]);
+  console.log(
+    "Going to insert ",
+    itemData[DB_PROPERTIES.RATING_DATE],
+    itemData[DB_PROPERTIES.TITLE]
+  );
   try {
     // @TODO: refactor this to add property value generator by value type
     let properties = {};
     const keys = Object.keys(DB_PROPERTIES);
-    keys.forEach(key => {
+    keys.forEach((key) => {
       if (itemData[DB_PROPERTIES[key]]) {
-        properties[DB_PROPERTIES[key]] = getPropertyValye(itemData[DB_PROPERTIES[key]], PropertyType[key], DB_PROPERTIES[key]);
+        properties[DB_PROPERTIES[key]] = getPropertyValye(
+          itemData[DB_PROPERTIES[key]],
+          PropertyType[key],
+          DB_PROPERTIES[key]
+        );
       }
     });
 
     const dbid = getDBID(category);
     if (!dbid) {
-      throw new Error('No databse id found for category: ' + category);
+      throw new Error("No databse id found for category: " + category);
     }
-    const db = await notion.databases.retrieve({database_id: dbid});
+    const db = await notion.databases.retrieve({ database_id: dbid });
     const columns = Object.keys(db.properties);
     // remove cols which are not in the current database
     const propKeys = Object.keys(properties);
-    propKeys.map(prop => {
+    propKeys.map((prop) => {
       if (columns.indexOf(prop) < 0) {
         delete properties[prop];
       }
@@ -432,7 +545,7 @@ async function addToNotion(itemData, category) {
         database_id: dbid,
       },
       icon: {
-        type: 'emoji',
+        type: "emoji",
         emoji: EMOJI[category],
       },
       // fill in properties by the format: https://developers.notion.com/reference/page#page-property-value
@@ -441,17 +554,27 @@ async function addToNotion(itemData, category) {
     if (properties[DB_PROPERTIES.POSTER]) {
       // use poster for the page cover
       postData.cover = {
-        type: 'external',
+        type: "external",
         external: {
           url: properties[DB_PROPERTIES.POSTER]?.files[0]?.external?.url, // cannot be empty string or null
         },
-      }
+      };
     }
     const response = await notion.pages.create(postData);
     if (response && response.id) {
-      console.log(itemData[DB_PROPERTIES.TITLE] + `[${itemData[DB_PROPERTIES.ITEM_LINK]}]` + ' page created.');
+      console.log(
+        itemData[DB_PROPERTIES.TITLE] +
+          `[${itemData[DB_PROPERTIES.ITEM_LINK]}]` +
+          " page created."
+      );
     }
   } catch (error) {
-    console.warn('Failed to create ' + itemData[DB_PROPERTIES.TITLE] + `(${itemData[DB_PROPERTIES.ITEM_LINK]})` + ' with error: ', error);
+    console.warn(
+      "Failed to create " +
+        itemData[DB_PROPERTIES.TITLE] +
+        `(${itemData[DB_PROPERTIES.ITEM_LINK]})` +
+        " with error: ",
+      error
+    );
   }
 }
