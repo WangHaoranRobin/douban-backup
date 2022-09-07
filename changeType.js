@@ -5,7 +5,7 @@ const got = require("got");
 const fs = require("fs");
 
 const notion = new Client({
-  auth: "secret_eCl03buOceBHRbvEe7jlt9Jfgj9LHGYnFFtqDmrUsmo",
+  auth: process.env.NOTION_TOKEN,
 });
 
 const icons = {
@@ -34,7 +34,7 @@ const icons = {
 
   while (has_more) {
     const response = await notion.databases.query({
-      database_id: "e043a6803faf43cd9d2a9ded57c2f4e9",
+      database_id: process.env.NOTION_MOVIE_DATABASE_ID,
       filter: {
         property: "Type",
         select: {
