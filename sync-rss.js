@@ -57,7 +57,7 @@ const DOUBAN_USER_ID = "178287366"; //process.env.DOUBAN_USER_ID;
 const notion = new Client({
   auth: process.env.NOTION_TOKEN,
 });
-const movieDBID = process.env.NOTION_DATABASE_ID;
+const movieDBID = process.env.NOTION_MOVIE_DATABASE_ID;
 
 function delay(time) {
   return new Promise((resolve) => setTimeout(resolve, time));
