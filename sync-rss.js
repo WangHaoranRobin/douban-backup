@@ -55,9 +55,9 @@ const EMOJI = {
 
 const DOUBAN_USER_ID = "178287366"; //process.env.DOUBAN_USER_ID;
 const notion = new Client({
-  auth: "secret_eCl03buOceBHRbvEe7jlt9Jfgj9LHGYnFFtqDmrUsmo", //process.env.NOTION_TOKEN,
+  auth: process.env.NOTION_TOKEN,
 });
-const movieDBID = "e043a6803faf43cd9d2a9ded57c2f4e9";
+const movieDBID = process.env.NOTION_DATABASE_ID;
 
 function delay(time) {
   return new Promise((resolve) => setTimeout(resolve, time));
