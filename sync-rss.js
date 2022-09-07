@@ -163,7 +163,7 @@ async function handleFeed(feed, category) {
     process.exit(1);
   }
 
-  let newFeed;
+  let newFeed = [];
   if (filtered.results.length) {
     for (item of feed) {
       let findItem = await filtered.results.reduce(async (acc, i) => {
