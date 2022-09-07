@@ -55,7 +55,7 @@ const icons = {
     console.log(item.properties.Link.url);
     let type = await getTypeFor(item.properties.Link.url);
     console.log(type);
-    ic =
+    let ic =
       item.properties.Status.select.name == "Want to"
         ? type == "Film"
           ? "wishMovie"
