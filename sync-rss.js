@@ -280,6 +280,14 @@ async function fetchItem(link) {
   const response = await got(link);
   const dom = new JSDOM(response.body);
 
+  let imdbId = dom.window.document
+    .querySelector("#content #info")
+    .textContent.trim();
+  if (imdbId.includes("IMDb:")) {
+    imdbId = imdbId.split("IMDb:")[1].trim();
+    itemData.IMDb = imdbId;
+  }
+
   typeInfo = dom.window.document
     .querySelector("#content #recommendations i")
     .textContent.trim();
@@ -394,6 +402,15 @@ async function addToNotion(itemData) {
             },
             Link: {
               url: itemData.Link,
+            },
+            "IMDb Id": {
+              rich_text: [
+                {
+                  text: {
+                    content: itemData.IMDb ? itemData.IMDb : "N/A",
+                  },
+                },
+              ],
             },
           },
           children: [
