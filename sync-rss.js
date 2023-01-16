@@ -465,6 +465,15 @@ async function addToNotion(itemData) {
             Link: {
               url: itemData.Link,
             },
+            "IMDb Id": {
+              rich_text: [
+                {
+                  text: {
+                    content: itemData.IMDb ? itemData.IMDb : "N/A",
+                  },
+                },
+              ],
+            },
           },
           children: [
             {
