@@ -8,6 +8,7 @@ const Parser = require("rss-parser");
 const parser = new Parser();
 const { DB_PROPERTIES, PropertyType, sleep } = require("./util");
 const fs = require("fs");
+const axios = require("axios");
 
 config();
 
@@ -58,6 +59,8 @@ const notion = new Client({
   auth: process.env.NOTION_TOKEN,
 });
 const movieDBID = process.env.NOTION_MOVIE_DATABASE_ID;
+const TMDb_API_KEY = process.env.TMDB_API_KEY;
+const RAPID_API_KEY = process.env.RAPID_API_KEY;
 
 function delay(time) {
   return new Promise((resolve) => setTimeout(resolve, time));
@@ -219,7 +222,7 @@ async function handleFeed(feed, category) {
       );
       itemData.id = item.notionId;
     } catch (error) {
-      console.error(link, error);
+      console.error(error);
     }
 
     console.log(itemData);
@@ -280,14 +283,6 @@ async function fetchItem(link) {
   const response = await got(link);
   const dom = new JSDOM(response.body);
 
-  let imdbId = dom.window.document
-    .querySelector("#content #info")
-    .textContent.trim();
-  if (imdbId.includes("IMDb:")) {
-    imdbId = imdbId.split("IMDb:")[1].trim();
-    itemData.IMDb = imdbId;
-  }
-
   typeInfo = dom.window.document
     .querySelector("#content #recommendations i")
     .textContent.trim();
@@ -297,18 +292,150 @@ async function fetchItem(link) {
     : typeInfo == "喜欢这部电影的人也喜欢"
     ? "Film"
     : "TV Series";
-  itemData.Name = dom.window.document
+  itemData.OriginalTitle = dom.window.document
     .querySelector('#content h1 [property="v:itemreviewed"]')
     .textContent.trim();
-  itemData.Thumbnail = dom.window.document
+  itemData.PosterUrl = dom.window.document
     .querySelector("#mainpic img")
-    ?.src.replace(/\.webp$/, ".jpg");
+    ?.src.replace(/\.webp$/, " jpg");
+
+  let imdbId = dom.window.document
+    .querySelector("#content #info")
+    .textContent.trim();
+  if (imdbId.includes("IMDb:")) {
+    imdbId = imdbId.split("IMDb:")[1].trim();
+    imdbId = imdbId.split(" ")[0].trim();
+    itemData.IMDb = imdbId;
+
+    imdbExist: if (imdbId) {
+      try {
+        const options = {
+          method: "GET",
+          url: "https://streaming-availability.p.rapidapi.com/get/basic",
+          params: { country: "us", imdb_id: imdbId, output_language: "en" },
+          headers: {
+            "X-RapidAPI-Key": RAPID_API_KEY,
+            "X-RapidAPI-Host": "streaming-availability.p.rapidapi.com",
+          },
+        };
+        // Try to get streaming availability
+        const media_data = (await axios.request(options)).data;
+        if (media_data) {
+          // Get poster url 780 p
+          const poster_url = media_data.posterURLs["780"]
+            ? media_data.posterURLs["780"]
+            : media_data.posterURLs[media_data.posterURLs.length - 1];
+          // Get Title and original title
+          const title = media_data.title;
+          const original_title = media_data.originalTitle;
+          // Get Year
+          const year = media_data.year;
+          // Get director
+          const directors = media_data.significants;
+          // Get TMDb Id
+          const TMDb_Id = media_data.tmdbID;
+          // Get Streaming availability
+          const streaming_availability = Object.keys(media_data.streamingInfo);
+
+          if (title) {
+            itemData.PosterUrl = poster_url;
+            itemData.Title = title;
+            itemData.OriginalTitle = original_title;
+            itemData.Year = year;
+            itemData.Directors = directors;
+            itemData.TMDbId = TMDb_Id;
+            itemData.StreamingAvailability = streaming_availability;
+          }
+        }
+      } catch (error) {
+        console.log("====================================");
+        console.log("Trying to get media details from TMDb");
+        console.log("====================================");
+        // Get TMDb Id using IMDb Id
+        const options = {
+          method: "GET",
+          url: `https://api.themoviedb.org/3/find/${imdbId}`,
+          params: {
+            api_key: TMDb_API_KEY,
+            language: "en-US",
+            external_source: "imdb_id",
+          },
+        };
+
+        const response = (await axios.request(options)).data;
+
+        if (itemData.Type == "Film") {
+          if (!response.movie_results.length) {
+            console.log("====================================");
+            console.log("No movie found");
+            console.log("====================================");
+            break imdbExist;
+          }
+          const TMDb_Id = response.movie_results[0].id;
+          const options = {
+            method: "GET",
+            url: `https://api.themoviedb.org/3/movie/${TMDb_Id}`,
+            params: { api_key: TMDb_API_KEY, language: "en-US" },
+          };
+          const media_data = (await axios.request(options)).data;
+          const options_credit = {
+            method: "GET",
+            url: `https://api.themoviedb.org/3/movie/${TMDb_Id}/credits`,
+            params: { api_key: TMDb_API_KEY, language: "en-US" },
+          };
+          const media_data_credit = (await axios.request(options_credit)).data;
+          if (media_data) {
+            itemData.PosterUrl =
+              "https://image.tmdb.org/t/p/original/" + media_data.poster_path;
+            itemData.Title = media_data.title;
+            itemData.OriginalTitle = media_data.original_title;
+            itemData.Year = Number(media_data.release_date.split("-")[0]);
+            itemData.Directors = media_data_credit.crew
+              .filter((item) => item.job == "Director")
+              .map((item) => item.name);
+            itemData.TMDbId = TMDb_Id.toString();
+          }
+        } else if (itemData.Type == "TV Series") {
+          if (!response.tv_results.length) {
+            console.log("====================================");
+            console.log("No TV Series found");
+            console.log("====================================");
+            break imdbExist;
+          }
+          const TMDb_Id = response.tv_results[0].id;
+          const options = {
+            method: "GET",
+            url: `https://api.themoviedb.org/3/tv/${TMDb_Id}`,
+            params: { api_key: TMDb_API_KEY, language: "en-US" },
+          };
+          const media_data = (await axios.request(options)).data;
+          const options_credit = {
+            method: "GET",
+            url: `https://api.themoviedb.org/3/tv/${TMDb_Id}/credits`,
+            params: { api_key: TMDb_API_KEY, language: "en-US" },
+          };
+          const media_data_credit = (await axios.request(options_credit)).data;
+          if (media_data) {
+            itemData.PosterUrl =
+              "https://image.tmdb.org/t/p/original/" + media_data.poster_path;
+            itemData.Title = media_data.name;
+            itemData.OriginalTitle = media_data.original_name;
+            itemData.Year = Number(media_data.first_air_date.split("-")[0]);
+            itemData.Directors = media_data_credit.crew
+              .filter((item) => item.job == "Director")
+              .map((item) => item.name);
+            itemData.TMDbId = TMDb_Id.toString();
+          }
+        }
+      }
+    }
+  }
 
   return itemData;
 }
 
 async function addToNotion(itemData) {
-  console.log("Going to insert ", itemData.Name);
+  console.log("Going to insert ", itemData.Title);
   try {
     let ic =
       itemData.Status == "Want to"
@@ -373,120 +500,117 @@ async function addToNotion(itemData) {
         });
       }
     } else {
+      let newPage = {
+        parent: {
+          type: "database_id",
+          database_id: movieDBID,
+        },
+        icon: icons[ic],
+        properties: {
+          Type: {
+            select: {
+              name: itemData.Type,
+            },
+          },
+          Name: {
+            title: [
+              {
+                text: {
+                  content: itemData.OriginalTitle,
+                },
+              },
+            ],
+          },
+          Status: {
+            select: {
+              name: itemData.Status,
+            },
+          },
+          Link: {
+            url: itemData.Link,
+          },
+          "IMDb Id": {
+            rich_text: [
+              {
+                text: {
+                  content: itemData.IMDb ? itemData.IMDb : "N/A",
+                },
+              },
+            ],
+          },
+          "TMDb Id": {
+            rich_text: [
+              {
+                text: {
+                  content: itemData.TMDbId ? itemData.TMDbId : "N/A",
+                },
+              },
+            ],
+          },
+          "English Title": {
+            rich_text: [
+              {
+                text: {
+                  content: itemData.Title
+                    ? itemData.Title
+                    : itemData.OriginalTitle,
+                },
+              },
+            ],
+          },
+        },
+        children: [
+          {
+            object: "block",
+            image: {
+              type: "external",
+              external: {
+                url: itemData.PosterUrl,
+              },
+            },
+          },
+        ],
+      };
+      if (itemData.Year) {
+        newPage.properties["Year"] = {
+          number: itemData.Year,
+        };
+      }
+      if (
+        itemData.StreamingAvailability &&
+        itemData.StreamingAvailability.length
+      ) {
+        newPage.properties["Streaming Availability"] = {
+          multi_select: itemData.StreamingAvailability.map((s) => {
+            return {
+              name: s,
+            };
+          }),
+        };
+      }
+      if (itemData.Directors && itemData.Directors.length) {
+        newPage.properties["Creator"] = {
+          multi_select: itemData.Directors.map((d) => {
+            return {
+              name: d,
+            };
+          }),
+        };
+      }
       if (itemData.Status == "Want to") {
-        await notion.pages.create({
-          parent: {
-            type: "database_id",
-            database_id: movieDBID,
-          },
-          icon: icons[ic],
-          properties: {
-            Type: {
-              select: {
-                name: itemData.Type,
-              },
-            },
-            Name: {
-              title: [
-                {
-                  text: {
-                    content: itemData.Name,
-                  },
-                },
-              ],
-            },
-            Status: {
-              select: {
-                name: itemData.Status,
-              },
-            },
-            Link: {
-              url: itemData.Link,
-            },
-            "IMDb Id": {
-              rich_text: [
-                {
-                  text: {
-                    content: itemData.IMDb ? itemData.IMDb : "N/A",
-                  },
-                },
-              ],
-            },
-          },
-          children: [
-            {
-              object: "block",
-              image: {
-                type: "external",
-                external: {
-                  url: itemData.Thumbnail,
-                },
-              },
-            },
-          ],
-        });
+        await notion.pages.create(newPage);
       } else {
-        await notion.pages.create({
-          parent: {
-            type: "database_id",
-            database_id: movieDBID,
+        newPage.Score = {
+          select: {
+            name: itemData.Rating,
           },
-          icon: icons[ic],
-          properties: {
-            Type: {
-              select: {
-                name: itemData.Type,
-              },
-            },
-            Name: {
-              title: [
-                {
-                  text: {
-                    content: itemData.Name,
-                  },
-                },
-              ],
-            },
-            Status: {
-              select: {
-                name: itemData.Status,
-              },
-            },
-            Score: {
-              select: {
-                name: itemData.Rating,
-              },
-            },
-            "Date Finished": {
-              date: {
-                start: itemData["Date Finished"],
-              },
-            },
-            Link: {
-              url: itemData.Link,
-            },
-            "IMDb Id": {
-              rich_text: [
-                {
-                  text: {
-                    content: itemData.IMDb ? itemData.IMDb : "N/A",
-                  },
-                },
-              ],
-            },
+        };
+        newPage["Date Finished"] = {
+          date: {
+            start: itemData["Date Finished"],
           },
-          children: [
-            {
-              object: "block",
-              image: {
-                type: "external",
-                external: {
-                  url: itemData.Thumbnail,
-                },
-              },
-            },
-          ],
-        });
+        };
+        await notion.pages.create(newPage);
       }
     }
   } catch (error) {
