@@ -59,13 +59,7 @@ const notion = new Client({
   auth: process.env.NOTION_TOKEN,
 });
 const movieDBID = process.env.NOTION_MOVIE_DATABASE_ID;
-console.log("====================================");
-console.log("movieDBID: ", movieDBID);
-console.log("====================================");
 const TMDb_API_KEY = process.env.TMDB_API_KEY;
-console.log("====================================");
-console.log("TMDb_API_KEY: ", TMDb_API_KEY);
-console.log("====================================");
 const RAPID_API_KEY = process.env.RAPID_API_KEY;
 
 function delay(time) {
