@@ -60,6 +60,9 @@ const notion = new Client({
 });
 const movieDBID = process.env.NOTION_MOVIE_DATABASE_ID;
 const TMDb_API_KEY = process.env.TMDB_API_KEY;
+console.log("====================================");
+console.log("TMDb_API_KEY: ", TMDb_API_KEY);
+console.log("====================================");
 const RAPID_API_KEY = process.env.RAPID_API_KEY;
 
 function delay(time) {
