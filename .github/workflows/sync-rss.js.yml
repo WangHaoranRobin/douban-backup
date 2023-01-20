@@ -8,11 +8,10 @@ on:
   schedule:
     # https://docs.github.com/en/actions/reference/events-that-trigger-workflows#scheduled-events
     # Runs every 6 hours
-    - cron:  '0 */6 * * *'
+    - cron: "0 */6 * * *"
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
 
     strategy:
@@ -28,12 +27,14 @@ jobs:
       NOTION_GAME_DATABASE_ID: ${{ secrets.NOTION_GAME_DATABASE_ID }}
       NOTION_DRAMA_DATABASE_ID: ${{ secrets.NOTION_DRAMA_DATABASE_ID }}
       DOUBAN_USER_ID: ${{ secrets.DOUBAN_USER_ID }}
+      TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+      RAPID_API_KEY: ${{ secrets.RAPID_API_KEY }}
 
     steps:
-    - uses: actions/checkout@v2
-    - name: Use Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@v2
-      with:
-        node-version: ${{ matrix.node-version }}
-    - run: npm ci
-    - run: node sync-rss.js || exit 1
+      - uses: actions/checkout@v2
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v2
+        with:
+          node-version: ${{ matrix.node-version }}
+      - run: npm ci
+      - run: node sync-rss.js || exit 1
