@@ -521,6 +521,16 @@ async function addToNotion(itemData) {
               },
             ],
           },
+          "Date Finished": {
+            date: {
+              start: itemData["Date Finished"],
+            },
+          },
+          Score: {
+            select: {
+              name: itemData.Rating,
+            },
+          },
           Status: {
             select: {
               name: itemData.Status,
